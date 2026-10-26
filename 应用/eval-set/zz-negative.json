@@ -1,0 +1,33 @@
+[
+  { "q": "今天广州天气怎么样", "expect": null, "kind": "out_of_scope", "note": "完全越界：非校史" },
+  { "q": "明天出门要带伞吗", "expect": null, "kind": "out_of_scope", "note": "完全越界" },
+  { "q": "帮我写一段python冒泡排序", "expect": null, "kind": "unrelated", "note": "编程请求" },
+  { "q": "讲个笑话给我听", "expect": null, "kind": "unrelated", "note": "闲聊" },
+  { "q": "帮我把这段话翻译成英文", "expect": null, "kind": "unrelated", "note": "工具型请求" },
+  { "q": "我要投诉学校食堂", "expect": null, "kind": "unrelated", "note": "投诉，非问史" },
+
+  { "q": "北京大学是哪一年创办的", "expect": null, "kind": "out_of_corpus", "note": "校外学校" },
+  { "q": "中山大学和暨南大学哪个更好", "expect": null, "kind": "out_of_corpus", "note": "比较题，库里无评价性内容" },
+  { "q": "华侨大学和暨南大学是什么关系", "expect": null, "kind": "out_of_corpus", "note": "库里没有华侨大学" },
+  { "q": "暨南大学和济南大学是同一所吗", "expect": null, "kind": "near_miss", "note": "同音陷阱：济南/暨南，库里无辨析条目" },
+
+  { "q": "暨南大学食堂哪个窗口最好吃", "expect": null, "kind": "in_school_no_data", "note": "校内但库外" },
+  { "q": "暨南大学有几个食堂", "expect": null, "kind": "in_school_no_data", "note": "校内但库外" },
+  { "q": "暨南大学2026年录取分数线是多少", "expect": null, "kind": "in_school_no_data", "note": "招生数据不在库内" },
+  { "q": "暨南大学计算机专业排全国第几", "expect": null, "kind": "in_school_no_data", "note": "排名数据不在库内" },
+  { "q": "暨南大学图书馆几点关门", "expect": null, "kind": "in_school_no_data", "note": "开放时间不在库内" },
+  { "q": "暨南大学附属医院怎么挂号", "expect": null, "kind": "in_school_no_data", "note": "服务信息不在库内" },
+  { "q": "暨南大学石牌校区坐地铁怎么走", "expect": null, "kind": "in_school_no_data", "note": "交通信息不在库内" },
+  { "q": "暨南大学有没有航天专业", "expect": null, "kind": "in_school_no_data", "note": "库内只有学科门类总数，没有逐专业可查" },
+
+  { "q": "暨南大学的校旗是什么样子", "expect": null, "kind": "near_miss", "note": "库里有校徽校歌校训校门，但没有校旗" },
+  { "q": "暨南大学校庆主题曲是哪首歌", "expect": null, "kind": "near_miss", "note": "有校歌、有校庆主题，但没有\"校庆主题曲\"这回事" },
+  { "q": "明湖里养了什么鱼", "expect": null, "kind": "near_miss", "note": "明湖在库内，但鱼是库外细节" },
+  { "q": "暨南大学校徽值多少钱", "expect": null, "kind": "near_miss", "note": "校徽在库内，但估值是库外" },
+
+  { "q": "暨南大学2027年校庆有什么安排", "expect": null, "kind": "future", "note": "超出已发布信息" },
+  { "q": "暨南大学明年会开什么新专业", "expect": null, "kind": "future", "note": "未来信息" },
+
+  { "q": "抗日战争是哪一年结束的", "expect": null, "kind": "out_of_corpus", "note": "通史常识，非暨南校史条目" },
+  { "q": "端方是哪位皇帝的弟弟", "expect": null, "kind": "out_of_corpus", "note": "端方在库内，但其亲属关系库外" }
+]

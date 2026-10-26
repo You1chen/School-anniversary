@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>暨南校史数字人 · 百廿校庆</title>
+<link rel="icon" href="__LOGO__">
+<script>
+// 启动自检（独立脚本块，只用 ES5；主脚本解析失败时下面会显示原因）
+window.__errs = [];
+window.onerror = function (m, s, l) { window.__errs.push(String(m) + ' @' + l); return false; };
+window.addEventListener('unhandledrejection', function (e) { var r = e && e.reason; window.__errs.push((r && r.message) || String(r)); });
+</script>
+<style>
+  /* 主色取自立绘本身：把 a-jing.jpg 每个像素量化到 16 级/通道后，出现最多的几块颜色是
+     #484868(10.5%)／#6878A8(6.6%)／#383858(6.0%)——靛蓝偏紫，高光带一点淡薰衣草灰。
+     画面里几乎没有绿，所以原先那套青色（#0d5c63，色相 184°）和角色是隔在对侧的。
+     校徽标准色「蓝绿色」不在这里还原：校徽本身就带着它自己的颜色（页眉那枚 logo.jpg 没重新着色），
+     界面配色与它是两回事。详见 应用/README.md。 */
+  :root{--blue:#3a3a63;--blue2:#5b5f96;--bg:#f5f4f8;--card:#fff;--line:#e3e1ea;--text:#22223a;--muted:#68677e;--ok:#1c7a4a;--warn:#a8620a;--bad:#b8232f}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--text)}
+  #boot-warn{display:none;padding:12px 20px;background:#fff4f4;border-bottom:1px solid #f0c9cd;color:#8a1a22;font-size:13px;line-height:1.8}
+  header{background:linear-gradient(120deg,var(--blue),var(--blue2));color:#fff;padding:14px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0;font-weight:600}
+  header .logo{width:36px;height:36px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.45);flex:0 0 auto}
+  header .sub{font-size:12px;opacity:.85}
+  .pill{margin-left:auto;font-size:12px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);padding:5px 12px;border-radius:99px;cursor:pointer}
+  .pill.on{background:rgba(28,122,74,.85);border-color:transparent}
+  header button.ghost{font:inherit;font-size:12.5px;padding:6px 14px;border-radius:99px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.14);color:#fff;cursor:pointer}
+  main{display:grid;grid-template-columns:290px 1fr;gap:16px;padding:16px;max-width:1200px;margin:0 auto}
+  @media(max-width:880px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px}
+  /* 立绘。派生图是 #fcfcfc 的近白底，面板就用同一个色号——底色对上了，两者相接处就看不出边。
+     若改回原来的青灰渐变，图上会现出一个白方块（这是这张图没有透明通道的直接后果）。 */
+  #avatar{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:16px 0 12px;background:#fcfcfc;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0}
+  #avatar img{height:300px;width:auto;display:block;animation:float 4.5s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+  #avatar p{margin:0;font-size:12px;color:var(--muted);text-align:center;line-height:1.7}
+  .side{padding:12px 14px;font-size:12.5px;color:var(--muted);line-height:1.85}
+  .side b{color:var(--text)}
+  /* min-width:0 是**必需**的，不是保险：main 的轨道是 1fr = minmax(auto,1fr)，本卡片是它的网格项，
+     而 auto 的最小尺寸取内容的最小内容宽度。地图放大后 #mp-frame 宽到上千像素，这条链会一路把
+     卡片顶宽，#mp-canvas 于是不再是滚动容器、整页横向撑开，地图侧栏被挤出屏幕右侧。 */
+  .chat{display:flex;flex-direction:column;min-height:70vh;max-height:86vh;min-width:0}
+  .tabs{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .tabs button{font:inherit;font-size:13.5px;padding:7px 16px;border:1px solid var(--line);background:#fff;border-radius:99px;cursor:pointer;color:var(--muted)}
+  .tabs button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .panel{display:none;flex:1;flex-direction:column;min-height:0}
+  .panel.on{display:flex}
+  #log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+  .row{display:flex}.row.me{justify-content:flex-end}
+  .bubble{max-width:min(78%,620px);padding:11px 14px;border-radius:14px;line-height:1.85;font-size:14.5px;white-space:pre-wrap;word-break:break-word}
+  .me .bubble{background:var(--blue);color:#fff;border-bottom-right-radius:4px}
+  .bot .bubble{background:#f2f1f8;border:1px solid var(--line);border-bottom-left-radius:4px}
+  /* 兜底回答的气泡。fb 要挂在 .bubble 上——bubble() 是 b.className='bubble'+cls，
+     挂在行上（.bot.fb .bubble）这条选择器永远匹配不上，兜底就长得跟正常回答一模一样。
+     跟地图那条 g.on / .mp-r.on 是同一类错：页面不报错，只是这个视觉提示从来没出现过。
+     暖底配靛蓝页面的冷底，正是要它一眼看出来「这句不是从史料里来的」。 */
+  .bot .bubble.fb{background:#fff8ec;border-color:#f0dcc0}
+  /* 加载中的气泡左边摆一下鲸尾。图是从人设设定表里裁的（应用/avatar/whale-tail.png），
+     底色在那一步就刷成了纯白，所以这里的气泡底也得是纯白，否则会现出一小块方块。
+     「摆尾」只在「正在等」这一处用：它表明的是页面状态，不是史实，别拿它去标知识条目。 */
+  .load .bubble{background:#fff;display:flex;align-items:center;gap:9px}
+  .load .bubble::before{content:'';flex:0 0 auto;width:18px;height:26px;background:url("__TAIL__") center/contain no-repeat;transform-origin:50% 100%;animation:wag 1.15s ease-in-out infinite}
+  @keyframes wag{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}
+  .meta{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 12px}
+  .tag{font-size:11px;padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--muted)}
+  .tag.llm{color:var(--ok);border-color:#bfe0cd;background:#f2faf5}
+  .tag.raw{color:var(--warn);border-color:#f0dcc0;background:#fff8ec}
+  .tag.st{color:var(--bad);border-color:#f0c9cd;background:#fdf1f2}
+  .caveat{margin-top:8px;font-size:12.5px;line-height:1.75;color:#8a5a00;background:#fff8ec;border-left:3px solid #e0a94a;padding:7px 10px;border-radius:0 8px 8px 0}
+  .hints{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px}
+  .hints button{font:inherit;font-size:12.5px;padding:6px 11px;border-radius:99px;border:1px solid var(--line);background:#fff;color:var(--blue);cursor:pointer}
+  form{display:flex;gap:10px;padding:12px;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:180px;font:inherit;font-size:14.5px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;outline:none}
+  input[type=text]:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(74,74,128,.14)}
+  select{font:inherit;font-size:13.5px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  button.send{font:inherit;font-size:14px;padding:11px 22px;border:0;border-radius:10px;background:var(--blue);color:#fff;cursor:pointer}
+  button.send:disabled{opacity:.5;cursor:default}
+  .compose-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px;border-bottom:1px solid var(--line);font-size:13px}
+  .compose-bar label{color:var(--muted)}
+  #out{flex:1;overflow-y:auto;padding:16px;font-size:14.5px;line-height:1.9}
+  #out h1{font-size:19px;margin:0 0 12px}#out h2{font-size:16px;margin:16px 0 8px;color:var(--blue)}
+  #out table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}
+  #out th,#out td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+  #out th{background:#eeedf5}
+  #out blockquote{margin:10px 0;padding:8px 12px;background:#fff8ec;border-left:3px solid #e0a94a;border-radius:0 8px 8px 0;font-size:13px;color:#8a5a00}
+  #out ul{padding-left:22px}
+  .srcs{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--muted)}
+  .srcs ol{padding-left:20px;line-height:1.9}
+  .badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:6px;margin-left:8px;color:var(--ok);border:1px solid #bfe0cd;background:#f2faf5}
+  /* 弹窗 */
+  .mask{position:fixed;inset:0;background:rgba(22,20,44,.45);display:none;align-items:center;justify-content:center;z-index:99;padding:20px}
+  .mask.on{display:flex}
+  .modal{background:#fff;border-radius:16px;width:min(520px,100%);max-height:88vh;overflow-y:auto;padding:20px 22px;box-shadow:0 24px 60px rgba(0,0,0,.25);font-size:13px}
+  .modal h3{margin:0 0 4px;font-size:15px}
+  .modal .hint{font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:10px}
+  .modal label{display:block;margin:10px 0 4px;color:var(--muted);font-size:12.5px}
+  .modal input,.modal select{width:100%;font:inherit;font-size:13px;padding:9px 10px;border:1px solid var(--line);border-radius:9px;outline:none}
+  .modal input:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(74,74,128,.12)}
+  .modal .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .modal button{font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--blue);cursor:pointer}
+  .modal button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .modal button:disabled{opacity:.5}
+  .modal .warnbox{margin-top:10px;font-size:12px;background:#fff8ec;border-left:3px solid #e0a94a;padding:8px 10px;border-radius:0 6px 6px 0;color:#8a5a00;line-height:1.7}
+  .modal .okbox{margin-top:10px;font-size:12px;background:#f2faf5;border-left:3px solid #bfe0cd;padding:8px 10px;border-radius:0 6px 6px 0;color:#1c7a4a;line-height:1.7}
+  .modal.wide{width:min(640px,100%)}
+  .modal h4{margin:16px 0 6px;font-size:13.5px;color:var(--blue);font-weight:600}
+  .modal h4:first-of-type{margin-top:10px}
+  .modal ol,.modal ul{padding-left:20px;margin:4px 0;line-height:1.85;font-size:12.5px;color:#3f3e55}
+  .modal table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12.5px}
+  .modal table th{width:76px;text-align:left;font-weight:600;color:var(--text);border:1px solid var(--line);background:#eeedf5;padding:6px 9px;vertical-align:top}
+  .modal table td{border:1px solid var(--line);padding:6px 9px;color:#3f3e55}
+  .dim{color:var(--muted)}
+  .empty{color:var(--muted);font-size:13.5px;line-height:1.8}
+  .close{float:right;border:0;background:transparent;font-size:20px;color:var(--muted);cursor:pointer;line-height:1}
+  code{background:#efedf4;padding:1px 5px;border-radius:4px;font-size:12px}
+  /* 校园地图 */
+  #mp-wrap{flex:1;min-height:0;display:flex}
+  #mp-stage{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 14px;overflow:hidden}
+  .mp-note{flex:0 0 auto;margin:0 0 8px;font-size:12px;line-height:1.75;color:#8a5a00;background:#fff8ec;border-left:3px solid #e0a94a;padding:7px 10px;border-radius:0 8px 8px 0}
+  .mp-note b{color:#6d4700}
+  #mp-bar{flex:0 0 auto;display:flex;align-items:center;gap:6px;margin:0 0 8px;font-size:12px;color:var(--muted)}
+  #mp-bar button{font:inherit;font-size:12.5px;line-height:1;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--blue);cursor:pointer}
+  #mp-bar button:hover{border-color:var(--blue2);background:#f3f2f9}
+  #mp-scale{margin-left:2px;font-variant-numeric:tabular-nums}
+  /* 画布是滚动容器，图比它大时靠滚动看其余部分；图本身按 #mp-frame 的宽度等比缩放 */
+  #mp-canvas{flex:1;min-height:0;overflow:auto;background:#f3f2f8;border:1px solid var(--line);border-radius:12px}
+  /* 内联 SVG 只有 viewBox 的话，某些引擎会退化成 300×150 的默认尺寸；这里用绝对定位满铺，
+     宽高由父层的 <img> 撑出来，所以不必给 SVG 内禀尺寸。 */
+  #mp-frame{position:relative;width:100%;margin:0 auto}
+  #mp-img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+  #mp-svg{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+  /* 热区平时也留一层很淡的底色 + 一道细边：底图是竖长图，缩到一屏时字根本认不出，
+     若热区完全隐形，用户就没有任何线索知道哪里能点。9% 的青色洗底不压图上的地名。
+     non-scaling-stroke 让线宽不随 viewBox 缩放，放大到 1:1 时仍是一根细线，不会糊成一条带子。 */
+  .mp-r{fill:rgba(104,120,184,.14);stroke:rgba(72,72,120,.85);stroke-width:2;cursor:pointer;transition:fill .12s,stroke .12s;vector-effect:non-scaling-stroke}
+  /* 选中态的选择器落在 <g> 上而不是 .mp-r 上：mpPick 收到的 this 就是 <g>，一个地标
+     （如明湖的日湖+月湖）可能是两个 <rect>，亮起来的应当是整处地标而非其中一块。 */
+  .mp-r:hover,#mp-svg g.on .mp-r{fill:rgba(104,120,184,.36);stroke:#2f2f57;stroke-width:3}
+  #mp-tip{position:fixed;left:0;top:0;z-index:120;display:none;max-width:280px;padding:9px 12px;border-radius:10px;background:rgba(24,22,48,.95);color:#fff;font-size:12.5px;line-height:1.75;pointer-events:none;box-shadow:0 10px 26px rgba(0,0,0,.25)}
+  #mp-tip b{display:block;margin-bottom:3px;font-size:13px}
+  #mp-side{flex:0 0 300px;max-width:300px;border-left:1px solid var(--line);overflow-y:auto;padding:14px;font-size:13.5px;line-height:1.85}
+  #mp-side h3{margin:0 0 8px;font-size:15px;color:var(--blue)}
+  #mp-side img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--line);margin:0 0 6px}
+  #mp-side .mp-cap{font-size:11.5px;color:var(--muted);line-height:1.6;margin:0 0 10px}
+  #mp-side .mp-nopic{font-size:12px;color:var(--muted);line-height:1.7;background:#f5f4fa;border:1px dashed var(--line);border-radius:10px;padding:9px 11px;margin:0 0 10px}
+  #mp-side .mp-ask{display:block;width:100%;text-align:left;margin-top:8px;font:inherit;font-size:12.5px;line-height:1.6;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--blue);cursor:pointer}
+  #mp-side .mp-ask:hover{border-color:var(--blue2);background:#f3f2f9}
+  #mp-side .mp-idx-h{margin:10px 0 6px;font-size:12px;font-weight:600;color:var(--muted)}
+  #mp-side .mp-idx{display:flex;flex-wrap:wrap;gap:5px}
+  #mp-side .mp-go{font:inherit;font-size:12px;line-height:1.4;padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--blue);cursor:pointer}
+  #mp-side .mp-go:hover{border-color:var(--blue2);background:#f3f2f9}
+  #mp-side .mp-back{font:inherit;font-size:11.5px;line-height:1;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;margin:0 0 9px}
+  #mp-side .mp-back:hover{border-color:var(--blue2);background:#f3f2f9;color:var(--blue)}
+  @media(max-width:880px){
+    /* 窄屏上卡片不再固定高度、改由整页滚动。不这么改的话：#mp-side 装的是索引时很矮、
+       装上某处详情后按内容高度要一千多像素，而卡片高度被 86vh 卡死，多出来的空间只能从
+       #mp-stage 里扣——地图画布被挤成一条缝（右栏照样还得自己滚）。整页滚动是手机上更常规的形态。 */
+    .chat{max-height:none}
+    #mp-wrap{flex-direction:column}
+    #mp-stage{flex:0 0 auto}
+    #mp-side{flex:0 0 auto;max-width:none;overflow:visible;border-left:0;border-top:1px solid var(--line)}
+    /* 画布自己定高，地图在画布内部滚；高度只由视口决定，与右栏内容多少无关。
+       必须写在 flex-basis 上：总则里的 flex:1 等于 flex-basis:0%，而 flex-basis 会盖过 height 属性，
+       只写 height:56vh 是不生效的（画布会照旧长到整幅地图那么高）。 */
+    #mp-canvas{flex:0 0 56vh;min-height:300px}
+    /* 窄屏是单列，立绘压在对话上方：300px 的全身像得先滚过去才够得到提问框，这里压到 200px。 */
+    #avatar img{height:200px}
+  }
+</style>
+</head>
+<body>
+<div id="boot-warn"><b>页面脚本未能启动。</b><span id="boot-detail"></span> <span class="dim">请改用 Chrome 或 Edge 打开。</span></div>
+
+<header>
+  <img class="logo" src="__LOGO__" alt="暨南大学校徽">
+  <h1>暨南校史数字人<span class="sub">百廿校庆</span></h1>
+  <div class="pill" id="status" title="模型设置">初始化…</div>
+  <button class="ghost" id="open-help" type="button">帮助</button>
+  <button class="ghost" id="open-settings" type="button">设置</button>
+</header>
+
+<main>
+  <section class="card">
+    <div id="avatar">
+      <img id="avatar-img" src="__AVATAR__" alt="数字人「__PERSONA_NAME__」的立绘">
+      <p>__PERSONA_NAME__ · 校史讲解员</p>
+    </div>
+    <div class="side"><span id="lib-info">—</span></div>
+  </section>
+
+  <section class="card chat">
+    <div class="tabs">
+      <button id="tab-qa" class="on" type="button">校史问答</button>
+      <button id="tab-gen" type="button">内容生成</button>
+      <button id="tab-map" type="button">校园地图</button>
+    </div>
+
+    <div class="panel on" id="panel-qa">
+      <div id="log"></div>
+      <form id="f">
+        <select id="mode"></select>
+        <input type="text" id="q" placeholder="问一句暨南校史…" autocomplete="off">
+        <button class="send" id="send" type="submit">发送</button>
+      </form>
+    </div>
+
+    <div class="panel" id="panel-gen">
+      <div class="compose-bar">
+        <label>类型</label>
+        <select id="gkind"><option value="article">校史长文</option><option value="slogan">宣传语</option><option value="script">短视频脚本</option></select>
+        <label>素材</label>
+        <select id="gshard"></select>
+        <input type="text" id="gtopic" placeholder="主题词（可留空）" style="min-width:200px;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:10px">
+        <button class="send" id="ggo" type="button">生成</button>
+        <span id="ginfo" style="color:var(--muted);font-size:12px"></span>
+      </div>
+      <div id="out"><div class="empty">选择素材范围，生成校史长文、宣传语或脚本。</div></div>
+    </div>
+
+    <div class="panel" id="panel-map">
+      <div id="mp-wrap">
+        <div id="mp-stage">
+          <p class="mp-note">⚠ 底图是<strong>暨南大学《广州主校区校园地图》</strong>（图面标注「参考比例尺 1:2000」）——图上的地名是地图上印的，不是本作品画的。图上 <b>12 处描边区域</b>可交互：移上去看速览，点一下在右侧展开史照与讲解。该图未见成图年代标注，各地标的现状请以图上所绘为准。</p>
+          <div id="mp-bar">
+            <button type="button" id="mp-out" title="缩小">－</button>
+            <button type="button" id="mp-in" title="放大">＋</button>
+            <button type="button" id="mp-fit" title="整幅显示">适应</button>
+            <span id="mp-scale"></span>
+          </div>
+          <div id="mp-canvas">
+            <div id="mp-frame">
+              <!-- 四向同构：底图在 应用/map/campus-map.jpg（构建时内联成 data URI）、几何在本文件的 SVG 里
+                   （id="mp-r-<MP-id>"，viewBox 用底图原始像素坐标 6458×8901）、文字在
+                   知识库/shards/MP-校园导览.json、照片在 应用/photos/<MP-id>.jpg。build.mjs 校验四者
+                   一一对应，缺一即中止打包，所以这里不需要任何映射表。
+                   事件写成内联属性：verify.mjs 的 DOM 桩没有 querySelectorAll，启动时不能遍历绑定。 -->
+              <img id="mp-img" src="__MAP__" alt="暨南大学广州主校区校园地图">
+              <svg id="mp-svg" viewBox="0 0 6458 8901" preserveAspectRatio="none" role="img"
+                   aria-label="校园地图上的 12 处可交互地标：北门、艺术学院楼、建阳苑、苏州苑、教学大楼、礼堂、明湖、南湖、图书馆、邵逸夫体育馆、校友楼、华侨医院">
+                <g id="mp-r-MP-001" onclick="mpPick('MP-001',this)" onmouseover="mpHover('MP-001',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="4760" y="1000" width="330" height="180" rx="14"/></g>
+                <g id="mp-r-MP-002" onclick="mpPick('MP-002',this)" onmouseover="mpHover('MP-002',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="5060" y="2600" width="560" height="230" rx="14"/></g>
+                <g id="mp-r-MP-003" onclick="mpPick('MP-003',this)" onmouseover="mpHover('MP-003',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="2170" y="3520" width="480" height="1490" rx="14"/></g>
+                <g id="mp-r-MP-004" onclick="mpPick('MP-004',this)" onmouseover="mpHover('MP-004',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="2200" y="850" width="1280" height="1950" rx="14"/></g>
+                <g id="mp-r-MP-005" onclick="mpPick('MP-005',this)" onmouseover="mpHover('MP-005',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="3155" y="6450" width="655" height="295" rx="14"/></g>
+                <g id="mp-r-MP-006" onclick="mpPick('MP-006',this)" onmouseover="mpHover('MP-006',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="4170" y="4560" width="520" height="255" rx="14"/></g>
+                <g id="mp-r-MP-007" onclick="mpPick('MP-007',this)" onmouseover="mpHover('MP-007',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="3975" y="3645" width="760" height="695" rx="14"/><rect class="mp-r" x="4820" y="3655" width="875" height="440" rx="14"/></g>
+                <g id="mp-r-MP-008" onclick="mpPick('MP-008',this)" onmouseover="mpHover('MP-008',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="4820" y="5280" width="320" height="1080" rx="14"/></g>
+                <g id="mp-r-MP-009" onclick="mpPick('MP-009',this)" onmouseover="mpHover('MP-009',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="3125" y="5170" width="810" height="415" rx="14"/></g>
+                <g id="mp-r-MP-010" onclick="mpPick('MP-010',this)" onmouseover="mpHover('MP-010',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="2250" y="3060" width="580" height="270" rx="14"/></g>
+                <g id="mp-r-MP-011" onclick="mpPick('MP-011',this)" onmouseover="mpHover('MP-011',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="2225" y="5670" width="455" height="220" rx="14"/></g>
+                <g id="mp-r-MP-012" onclick="mpPick('MP-012',this)" onmouseover="mpHover('MP-012',this,event)" onmousemove="mpMove(event)" onmouseleave="mpHide()"><rect class="mp-r" x="4880" y="6720" width="1220" height="1680" rx="14"/></g>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <!-- 侧栏初始内容由脚本 mpIndex() 按知识库实时生成（地标索引点一下等于在图上也点一下）；
+             这里只留一份脚本没跑起来时的兜底文字 -->
+        <div id="mp-side"><div class="empty">
+          <p style="margin:0 0 8px"><b>石牌校区地图导览</b></p>
+          <p style="margin:0">鼠标移到图上任一描边区域可看速览，点一下展开该处的史照与完整讲解。</p>
+        </div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="mp-tip"></div>
+
+<!-- 模型设置弹窗 -->
+<div class="mask" id="mask">
+  <div class="modal">
+    <button class="close" id="close" type="button">×</button>
+    <h3>模型设置</h3>
+    <label>API 地址</label>
+    <input id="s-base" type="text" placeholder="https://api.deepseek.com/v1">
+    <label>模型</label>
+    <div style="display:flex;gap:8px">
+      <input id="s-model" type="text" placeholder="deepseek-v4-flash">
+      <button id="s-scan" type="button" style="white-space:nowrap">扫描可用模型</button>
+    </div>
+    <div id="s-models" style="margin-top:6px"></div>
+    <label>API 密钥</label>
+    <div style="display:flex;gap:8px">
+      <input id="s-key" type="password" placeholder="sk-…（只保存在本机浏览器）">
+      <label style="white-space:nowrap;cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:9px 12px;color:var(--blue);background:#fff">从文件导入<input id="s-keyfile" type="file" accept=".txt,.key,text/plain" style="display:none"></label>
+    </div>
+    <div class="row">
+      <button class="primary" id="s-save" type="button">保存</button>
+      <button id="s-test" type="button">测试连接</button>
+      <button id="s-revive" type="button">重试内置模型</button>
+      <button id="s-clear" type="button">清除</button>
+    </div>
+    <div id="s-state" style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.7"></div>
+  </div>
+</div>
+
+<!-- 帮助 -->
+<div class="mask" id="help-mask">
+  <div class="modal wide">
+    <button class="close" id="help-close" type="button">×</button>
+    <h3>帮助</h3>
+
+    <h4>开始使用</h4>
+    <ol>
+      <li>直接提问即可，页面已内置可用的模型服务。</li>
+      <li>如需改用自己的服务，在右上角「设置」中填入 API 地址、模型与密钥。</li>
+    </ol>
+
+    <h4>页面状态</h4>
+    <table>
+      <tr><th>已连接</th><td>回答由大模型组织，语气更自然。</td></tr>
+      <tr><th>离线</th><td>内置模型已用尽或不可用。回答改为知识库标准答案，可正常使用；此时页面会提示填入自己的模型服务。</td></tr>
+    </table>
+
+    <h4>提问方式</h4>
+    <ul>
+      <li>可问人物、时间、地点、数字与事件始末。</li>
+      <li>支持口语化问法。超出校史范围的问题会被明确拒答，不会编造。</li>
+    </ul>
+
+    <h4>答案与来源</h4>
+    <ul>
+      <li>每条回答均标注来源。</li>
+      <li>史料存在多种说法时，两种口径一并给出，不代为取舍。</li>
+      <li>标注「待核实」的条目，表示现有官方资料尚未讲清。</li>
+    </ul>
+
+    <h4>内容生成</h4>
+    <ul>
+      <li>按时期或主题，生成校史长文、宣传语或短视频分镜脚本。</li>
+      <li>生成结果下方列出所用史料，便于核对。</li>
+    </ul>
+
+    <h4>校园地图</h4>
+    <ul>
+      <li>底图是<b>暨南大学《广州主校区校园地图》</b>（图面标注「参考比例尺 1:2000」），不是手绘示意图。图上划出十二处可交互区域：校门（今北门）、办公楼旧址（今艺术学院）、学生宿舍区、教工住宅区、教学大楼、大礼堂、明湖、南湖、图书馆（含世华馆）、蒙古包原址（今邵逸夫体育馆）、校友楼（校史馆）、华侨医院。</li>
+      <li>鼠标悬浮出色块速览，点一下在右侧展开该区域的历史照片、讲解、出处与口径提示。不需要密钥也能用。</li>
+      <li><b>图上的地名是地图上印的，不是本作品画的。</b>该图未见成图年代标注，所以写进知识库的 12 条方位一律标为待核实、各带口径提示；各地标的现状请以图上所绘为准。</li>
+      <li>想深入某个地标的历史，点侧栏的「深入」按钮，会带着问题回到「校史问答」。</li>
+    </ul>
+
+    <h4>密钥与分享</h4>
+    <ul>
+      <li>内置模型使用共享额度，用尽后需填入自己的服务。</li>
+      <li>自己填的密钥仅保存在本机浏览器，不写入本文件，文件可安全分享。</li>
+      <li>公用电脑不建议保存密钥。</li>
+    </ul>
+
+    <h4>数字人</h4>
+    <ul>
+      <li>讲解员叫「阿鲸」，一条蓝紫色的小鲸鱼——这是<b>本项目自拟的形象</b>，不是校徽或校史里的元素（校徽上画的是帆船）。<b>整页的配色都取自她这张立绘本身</b>，与校徽标准色无关：页眉那枚校徽仍是它自己的颜色，没有重新着色。被问到她的来历时，她也会这么答。</li>
+      <li>人设只改说话的口吻，不改事实：史料里没有的，它照样说没有。</li>
+      <li>形象是<b>本项目自拟的立绘</b>，由使用者提供的 AI 生成图裁切、缩放而来（原图右下角带「豆包AI生成」水印），<b>不是史料照片</b>——本地史料库里没有这个形象的资料。等答复时那句「正在查阅校史资料…」左边摆尾的鲸尾，是从同一份设定图里裁的。</li>
+      <li>形象尚未接入三维模型；朗读使用浏览器内置语音。</li>
+    </ul>
+
+    <div class="dim" style="margin-top:14px;font-size:12px">校徽与史料均取自暨南大学120周年校庆专题网。</div>
+  </div>
+</div>
+
+<script>
+window.__scriptLoaded = true;
+/*__SCORING__*/
+
+/*__CRYPTO__*/
+
+/* ===== 构建时注入：数据 ===== */
+const DATA = /*__DATA__*/;
+// 内置兜底模型链的密文（由 应用/tools/seal-fallback.mjs 生成；明文密钥不落任何文件）
+const FALLBACK_ENC = /*__FALLBACK_ENC__*/;
+const ITEMS = DATA.items;
+const SHARDS = DATA.shards;
+const FALLBACK = DATA.fallback;
+const PERSONA = DATA.persona;
+
+/* ===== 提示词（内联，少一个文件就少一个坏点）===== */
+const GUARD = [
+  '你只能依据【候选资料】回答，资料里没有的一律不要写，也不要用自己的知识补全。',
+  '不要编造人名、年份、数字、职务。资料里没写年份就不要写年份。',
+  '资料里标注"口径冲突/待核实"时，必须如实说明有几种说法，不要替用户选一个。',
+  '不要输出资料来源，不要写出资料编号。',
+  '用中文，口语化，全角标点。',
+];
+
+// 人设（口吻）与上面的硬规则拼在**同一处** —— 这是整个页面唯一的提示词组装点。
+// 顺序不能反：人设在前、GUARD 在后，冲突时以后者为准；那句优先级声明写在代码里而不是
+// persona.json 里，这样以后怎么改人设卡都删不掉它。build.mjs 会数「这句拼接在产物里出现的次数」，
+// 只许有一次（就是下面这行；连注释里写一遍都会被它数进去），多一处就是多一条绕开防幻觉规则的路径。
+const PERSONA_TONE = '【人设·只定口吻】\n'
+  + PERSONA.tone.join('\n') + '\n' + PERSONA.hard_rules.join('\n') + '\n'
+  + '本段只管说话的口吻。下面的规则永远优先于本段，冲突时一律以后面的规则为准。\n';
+function sysFor(task) { return PERSONA_TONE + GUARD.join('\n') + '\n' + task; }
+
+const MODES = {
+  brief:  { label: '简答',   sys: '用一句话直接回答，不超过 60 字。' },
+  spoken: { label: '口播稿', sys: '写一段可朗读的口播稿，80-150 字，不用 Markdown、不用括号注释、不用列表。' },
+  detail: { label: '详解',   sys: '先给结论再给细节，200-300 字，可用短句分点。' },
+};
+const GEN_KINDS = {
+  article: { label: '校史长文', temp: 0.45, max: 4000, sys: '把素材整合成一篇 600-1000 字的校史长文：自拟标题（# 标题），正文分 2-4 个小节（## 小标题），只在素材事实基础上组织，不新增史实。' },
+  slogan:  { label: '宣传语',   temp: 0.85, max: 2000, sys: '基于素材写 6-8 条宣传语，每条 ≤20 字，用无序列表输出，每条后加破折号和一句 ≤25 字的"依据"。' },
+  script:  { label: '短视频脚本', temp: 0.6, max: 4000, sys: '把素材组织成 60-90 秒短视频分镜脚本，用四列表格（镜号｜画面｜旁白｜字幕）；画面栏只能写素材中确实存在的照片内容，否则写"（示意画面·待补素材）"；旁白总 200-280 字。' },
+};
+
+/* ===== 设置 ===== */
+const LS = 'jnu-avatar-settings-v1';
+let api = { baseUrl: '', model: '', key: '' };
+try { api = Object.assign(api, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) {}
+const DEFAULTS = DATA.defaults || { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' };
+function hasKey(){ return Boolean(api.baseUrl && api.model && api.key); }
+function saveSettings(){ try { localStorage.setItem(LS, JSON.stringify(api)); } catch (e) {} }
+
+/* ===== 内置兜底模型链 =====
+   线路与密钥以密文内联（见 FALLBACK_ENC），运行时用 crypto-mini 解出。
+   用途：让拿到这个 HTML 的人不配任何东西就能用；等内置线路全部用尽，再弹窗要求填自己的服务。
+   口令以下面的掩码数组存放。说清楚边界：单文件里的"加密"只能防"被直接搜到明文"，
+   解密所需的一切必须随文件走 —— 要让密钥真正不可得，只能把密钥留在服务端。 */
+const _PK = [49, 53, 46, 106, 105, 107, 118, 58, 41, 48, 118, 61, 58, 55, 55, 57, 58, 56, 48, 118, 105, 107, 105, 109];
+const PASSPHRASE = _PK.map((c) => String.fromCharCode(c ^ 0x5b)).join('');
+
+const DEAD_KEY = 'jnu-route-dead-v1';
+let dead = {};
+try { dead = JSON.parse(localStorage.getItem(DEAD_KEY) || '{}') || {}; } catch (e) { dead = {}; }
+const saveDead = () => { try { localStorage.setItem(DEAD_KEY, JSON.stringify(dead)); } catch (e) {} };
+
+let CHAIN = null;              // 解密后的内置线路
+let chainErr = '';             // 解密失败原因（要能说出来，否则只是"内置模型悄悄没生效"）
+let chainTried = false;
+let lastRoute = null;          // 最近一次成功的线路，用于状态栏与自检
+
+const rKey = (r) => r.kind + '|' + r.baseUrl + '|' + r.models[0];
+const mKey = (r, m) => rKey(r) + '#' + m;
+// 403/401/402 停用整条线路；404 只停用那一个模型（同线路的其它模型仍可试）
+const isDead = (r, m) => Boolean(dead['R:' + rKey(r)] || (m && dead['M:' + mKey(r, m)]));
+
+async function ensureChain() {
+  if (chainTried) return CHAIN;
+  chainTried = true;
+  try {
+    const d = open(FALLBACK_ENC, PASSPHRASE);
+    const p = d.provider || {};
+    CHAIN = (d.chain || []).map((c) => ({
+      kind: 'fallback',
+      label: c.label,
+      baseUrl: c.baseUrl || p.baseUrl,
+      apiKey: c.apiKey || p.apiKey,
+      models: c.models || (c.model ? [c.model] : []),
+      thinking: c.thinking !== undefined ? c.thinking : p.thinking,
+    })).filter((r) => r.baseUrl && r.apiKey && r.models.length);
+    if (!CHAIN.length) chainErr = '内置线路为空';
+  } catch (e) { chainErr = e.message; CHAIN = []; }
+  return CHAIN;
+}
+
+const userRoute = () => (hasKey()
+  ? { kind: 'user', label: '我的模型', baseUrl: api.baseUrl, apiKey: api.key, models: [api.model] }
+  : null);
+function allRoutes(){ return [userRoute(), ...(CHAIN || [])].filter(Boolean); }
+function aliveRoutes(){ return allRoutes().filter((r) => !isDead(r)); }
+function hasModel(){
+  if (CHAIN === null) return hasKey() || Boolean(FALLBACK_ENC); // 尚未解密：带密文就先当作可用
+  return aliveRoutes().length > 0;
+}
+function reviveRoutes(){ dead = {}; saveDead(); updatePill(); }
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ===== 索引与检索 ===== */
+const { idf } = buildIndex(ITEMS);
+function candidatesFor(q){ return search(ITEMS, q, { topK: 8 }); }
+function entriesForTopic(t){ return searchTopic(ITEMS, idf, t, 8).filter((x) => x.score >= 0.15); }
+
+/* ===== 直调 API：一次调用 ===== */
+async function postChat(route, model, body) {
+  const res = await fetch(route.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + route.apiKey },
+    body: JSON.stringify({ model, ...body }),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined,
+  });
+  return { status: res.status, ok: res.ok, raw: await res.text() };
+}
+
+// 取正文；取不到就按 finish_reason 说清原因（这几种只在部分模型上出现）
+function readText(raw, maxTok) {
+  let d;
+  try { d = JSON.parse(raw); } catch (e) { throw new Error('返回不是合法 JSON：' + raw.slice(0, 160)); }
+  const ch = d && d.choices && d.choices[0];
+  const msg = ch && ch.message;
+  const text = (msg && typeof msg.content === 'string' ? msg.content : '').trim();
+  if (text) return text;
+  const reason = ch && ch.finish_reason;
+  const think = msg && msg.reasoning_content;
+  if (think && String(think).trim()) {
+    const e = new Error('思考占满了输出额度（max_tokens=' + maxTok + '，finish=' + reason + '）'); e.transient = true; throw e;
+  }
+  if (reason === 'length') { const e = new Error('被 max_tokens=' + maxTok + ' 截断'); e.transient = true; throw e; }
+  if (reason === 'content_filter') { const e = new Error('内容被服务商过滤'); e.transient = true; throw e; }
+  const e = new Error('返回空（finish=' + (reason || '未知') + '）'); e.transient = true; throw e;
+}
+
+async function callOnce(route, model, system, user, temp, maxTok) {
+  const body = {
+    temperature: temp, max_tokens: maxTok,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+  };
+  let res = await postChat(route, model, route.thinking ? { ...body, thinking: route.thinking } : body);
+  // 有些服务商不认 thinking 参数 → 400 就去掉重试一次
+  if (res.status === 400 && route.thinking) res = await postChat(route, model, body);
+
+  if (res.status === 401 || res.status === 403) { const e = new Error('HTTP ' + res.status + ' 无权限：' + res.raw.slice(0, 120)); e.hard = true; throw e; }
+  if (res.status === 402) { const e = new Error('额度已用尽（402）'); e.hard = true; throw e; }
+  if (res.status === 404) { const e = new Error('模型不存在或未开通（404）'); e.modelDead = true; throw e; }
+  if (!res.ok) { const e = new Error('HTTP ' + res.status + '：' + res.raw.slice(0, 120)); e.transient = true; throw e; }
+  return readText(res.raw, maxTok);
+}
+
+/* 带故障转移的调用：用户自己的线路优先，失败则依次落到内置兜底线路。
+   403/401/402 停用整条线路（记进 localStorage，避免每问都白试一次）；404 只停用那一个模型；
+   网络/5xx/额度截断这类瞬时错误只跳过、不停用。全部用尽 → 弹窗要求填自己的服务。 */
+async function callLLM(system, user, temp = 0.2, maxTok = 1500) {
+  await ensureChain();
+  const routes = aliveRoutes();
+  if (!routes.length) { onExhausted(); throw new Error('内置兜底模型已全部用尽'); }
+
+  let lastErr = '';
+  for (const route of routes) {
+    for (const model of route.models) {
+      if (isDead(route, model)) continue;
+      try {
+        const text = await callOnce(route, model, system, user, temp, maxTok);
+        lastRoute = { label: route.label, model, kind: route.kind };
+        updatePill();
+        return text;
+      } catch (e) {
+        lastErr = route.label + ' / ' + model + ' → ' + e.message;
+        if (e.hard) { dead['R:' + rKey(route)] = 1; saveDead(); break; }
+        if (e.modelDead) { dead['M:' + mKey(route, model)] = 1; saveDead(); }
+      }
+    }
+  }
+  onExhausted();
+  throw new Error(lastErr || '所有模型线路都不可用');
+}
+
+// 全部用尽 → 弹窗让用户填自己的服务（本次会话只弹一次，不反复打扰）
+let exhaustedShown = false;
+function onExhausted() {
+  updatePill();
+  if (exhaustedShown) return;
+  exhaustedShown = true;
+  $('s-state').innerHTML = '内置兜底模型已全部用尽（额度耗尽或无权限）。<br>请填入<b>你自己的模型服务</b>：API 地址、模型名与密钥。';
+  openModal(true);
+}
+function parseJson(text) {
+  const t = String(text || '').replace(/```json|```/g, '');
+  const m = t.match(/\{[\s\S]*\}/);
+  return m ? JSON.parse(m[0]) : null;
+}
+
+/* ===== 问答：检索 → （大模型融合复排+生成）→ 展示 ===== */
+function bubble(html, who, cls) {
+  const row = document.createElement('div'); row.className = 'row ' + who;
+  const b = document.createElement('div'); b.className = 'bubble' + (cls ? ' ' + cls : '');
+  b.innerHTML = html; row.appendChild(b); $('log').appendChild(row); $('log').scrollTop = $('log').scrollHeight;
+}
+function showHints(qs) {
+  if (!qs || !qs.length) return '';
+  const btns = qs.map((x) => `<button type="button" onclick="ask('${esc(x).replace(/'/g, "\\'")}')">${esc(x)}</button>`).join('');
+  return `<div class="hints">${btns}</div>`;
+}
+function renderAnswer(ans) {
+  const tags = [ans.llm ? '<span class="tag llm">模型生成</span>' : '<span class="tag raw">知识库参考答</span>'];
+  if (ans.entry.status && ans.entry.status !== 'verified') tags.push(`<span class="tag st">${esc(ans.entry.status)}</span>`);
+  tags.push(`<span class="tag">${esc(ans.entry.id)}</span>`);
+  const caveat = ans.entry.caveat ? `<div class="caveat">⚠ 需注意：${esc(ans.entry.caveat)}</div>` : '';
+  const src = ans.entry.source ? `<div class="meta"><span>出处：${esc(ans.entry.source)}</span></div>` : '';
+  bubble(`${esc(ans.answer)}<div class="meta">${tags.join('')}</div>${src}${caveat}`, 'bot');
+}
+
+async function ask(q, modeKey) {
+  q = (q ?? '').trim();
+  if (!q) return;
+  bubble(esc(q), 'me');
+  $('send').disabled = true;
+  const pend = document.createElement('div'); pend.className = 'row bot load';
+  pend.innerHTML = '<div class="bubble">正在查阅校史资料…</div>';
+  $('log').appendChild(pend);
+
+  try {
+    const { top } = candidatesFor(q);
+    const mode = MODES[modeKey] || MODES.spoken;
+
+    // 有可用线路（用户自己的或内置兜底的）：检索 + 大模型「融合复排+生成」一次调用
+    if (hasModel()) {
+      const list = top.map((x, i) => `[${i + 1}] ${x.entry.id}\n问法：${x.entry.question}\n内容：${x.entry.answer}\n原文依据：${x.entry.evidence || ''}${x.entry.caveat ? '\n注意（必须向用户说明）：' + x.entry.caveat : ''}`).join('\n\n');
+      const sys = sysFor(mode.sys + '\n\n只输出 JSON：{"pick": 命中的候选序号(1-' + top.length + ') 或 null, "answer": "你的回答"}。若候选都无法回答用户问题（例如用户问的是资料里没有的细节），pick 为 null，answer 写"资料里没有这一点"。');
+      const user = `用户问题：${q}\n\n【候选资料】\n${list}`;
+      const raw = await callLLM(sys, user, 0.2, 1500);
+      const j = parseJson(raw);
+      const idx = j && Number(j.pick);
+      if (j && Number.isInteger(idx) && idx >= 1 && idx <= top.length) {
+        const picked = top[idx - 1].entry;
+        renderAnswer({ entry: picked, answer: (j.answer || '').trim() || picked.answer, llm: true });
+      } else if (j && (j.pick === null || j.pick === undefined)) {
+        // 模型明确判定"候选都答不了" → 走兜底，不硬答
+        const said = (j.answer || '').trim();
+        bubble(esc(said && !/资料里没有/.test(said) ? said : FALLBACK.text) + showHints(FALLBACK.hints), 'bot', 'fb');
+      } else if (!j && raw) {
+        // 模型没按 JSON 格式来：把原文当答案，条目取分数最高的一条（别浪费一次成功的调用）
+        if (top.length && top[0].score >= 0.30) renderAnswer({ entry: top[0].entry, answer: raw, llm: true });
+        else bubble(esc(raw) + showHints(FALLBACK.hints), 'bot', 'fb');
+      } else {
+        bubble(esc(FALLBACK.text) + showHints(FALLBACK.hints), 'bot', 'fb');
+      }
+      return;
+    }
+
+    // 离线：取分数最高的一条参考答
+    if (top.length && top[0].score >= 0.34) {
+      renderAnswer({ entry: top[0].entry, answer: top[0].entry.answer, llm: false });
+    } else {
+      bubble(esc(FALLBACK.text) + showHints(FALLBACK.hints), 'bot', 'fb');
+    }
+  } catch (e) {
+    // 模型挂了就退回离线参考答
+    const { top } = candidatesFor(q);
+    if (top.length && top[0].score >= 0.34) renderAnswer({ entry: top[0].entry, answer: top[0].entry.answer, llm: false });
+    else bubble(esc(FALLBACK.text) + showHints(FALLBACK.hints), 'bot', 'fb');
+    console.warn('生成失败，已降级：', e.message);
+  } finally {
+    // 「正在查阅校史资料…」要撑到答复真的出来为止，所以在这里统一摘掉，不在中途摘。
+    // 原先它在 await 之前就 remove 了：气泡只存在同步的那一瞬、一次都没真正显示过，
+    // 左侧那只摆尾的鲸尾也就跟着白放了。
+    pend.remove();
+    $('send').disabled = false;
+  }
+}
+
+/* ===== 内容生成 ===== */
+function mdLite(src) {
+  const lines = esc(src).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').split('\n');
+  let h = '', tbl = false, lst = false, q = false;
+  const close = () => { if (tbl) { h += '</table>'; tbl = false; } if (lst) { h += '</ul>'; lst = false; } if (q) { h += '</blockquote>'; q = false; } };
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '');
+    if (/^\|/.test(line)) { const c = line.split('|').slice(1, -1).map((x) => x.trim()); if (c.every((x) => /^:?-+:?$/.test(x))) continue; if (!tbl) { close(); h += '<table>'; tbl = true; h += '<tr>' + c.map((x) => '<th>' + x + '</th>').join('') + '</tr>'; } else h += '<tr>' + c.map((x) => '<td>' + x + '</td>').join('') + '</tr>'; continue; }
+    if (/^&gt;\s?/.test(line)) { if (!q) { close(); h += '<blockquote>'; q = true; } h += line.replace(/^&gt;\s?/, '') + '<br>'; continue; }
+    if (/^[-*]\s+/.test(line)) { if (!lst) { close(); h += '<ul>'; lst = true; } h += '<li>' + line.replace(/^[-*]\s+/, '') + '</li>'; continue; }
+    if (/^#{1,2}\s+/.test(line)) { close(); const n = line.match(/^#+/)[0].length; h += '<h' + n + '>' + line.replace(/^#+\s+/, '') + '</h' + n + '>'; continue; }
+    if (!line.trim()) { close(); h += '<div style="height:6px"></div>'; continue; }
+    close(); h += '<p style="margin:6px 0">' + line + '</p>';
+  }
+  close();
+  return h;
+}
+async function generate() {
+  const kind = $('gkind').value;
+  const shard = $('gshard').value;
+  const topic = $('gtopic').value.trim();
+  let entries = [], label = '';
+  if (shard) { entries = ITEMS.filter((i) => i.shard === shard); const s = SHARDS.find((x) => x.shard === shard); label = (s ? s.title : shard) + '（整片）'; }
+  else if (topic) { entries = entriesForTopic(topic).map((x) => x.entry); label = '主题「' + topic + '」取前 ' + entries.length + ' 条'; }
+  else { $('gtopic').focus(); return; }
+  if (!entries.length) { $('out').innerHTML = '<div class="srcs">没有匹配素材，换个主题词或选一个分片。</div>'; return; }
+
+  $('ggo').disabled = true; $('ginfo').textContent = '处理中…';
+  const k = GEN_KINDS[kind];
+  let content = '', llm = false, err = '';
+  if (hasModel()) {
+    try {
+      const list = entries.map((e, i) => `[${i + 1}] ${e.id} ${e.period ? '（' + e.period + '）' : ''}\n${e.answer}${e.caveat ? '\n注意：' + e.caveat : ''}`).join('\n\n');
+      const sys = sysFor(k.sys);
+      const user = `主题：${label}\n\n【素材】\n${list}\n\n请创作。`;
+      content = await callLLM(sys, user, k.temp, k.max);
+      llm = true;
+    } catch (e) { err = e.message; }
+  }
+  if (!content) {
+    content = entries.map((e, i) => `## 素材${i + 1}｜${e.question}\n\n${e.answer}\n\n> 出处：${e.source}`).join('\n\n');
+    content = `> ⚠ 未配置模型（或调用失败），以下为素材汇编，不是生成内容。\n\n` + content;
+  }
+  const badge = llm ? '<span class="badge">模型生成</span>' : '';
+  const srcs = entries.map((e) => `<li><code>${esc(e.id)}</code> ${esc(e.source)}</li>`).join('');
+  $('out').innerHTML = mdLite(content) + `<div class="srcs"><b>本次使用的史料（${entries.length} 条）</b><ol>${srcs}</ol></div>`;
+  $('ginfo').innerHTML = `素材：${esc(label)}${badge}${err ? ' · 失败：' + esc(err) : ''}`;
+  $('ggo').disabled = false;
+}
+
+/* ===== 弹窗与状态 ===== */
+function updatePill() {
+  const st = $('status');
+  const alive = aliveRoutes();
+  if (hasModel()) {
+    st.textContent = '已连接';
+    st.className = 'pill on';
+    const cur = lastRoute ? lastRoute.label + ' · ' + lastRoute.model : (alive[0] ? alive[0].label : '');
+    st.title = '当前线路：' + cur;
+  } else {
+    st.textContent = '离线';
+    st.className = 'pill';
+    st.title = chainErr ? ('内置模型不可用：' + chainErr) : '模型线路已用尽，点此填入自己的服务';
+  }
+}
+function openModal(force) {
+  $('s-base').value = api.baseUrl || DEFAULTS.baseUrl;
+  $('s-model').value = api.model || DEFAULTS.model;
+  $('s-key').value = api.key;
+  if (!hasModel()) $('s-state').innerHTML = '填入你自己的模型服务（API 地址、模型名、密钥）。';
+  else if (hasKey()) $('s-state').innerHTML = '已配置你自己的模型；<b>清空后</b>则改用内置兜底模型。';
+  else $('s-state').innerHTML = '当前使用<b>内置兜底模型</b>，可直接关掉开始提问。<br>也可以填入你自己的服务来替代它。';
+  $('mask').classList.add('on');
+  if (force) setTimeout(() => $('s-key').focus(), 100);
+}
+const closeModal = () => { $('mask').classList.remove('on'); try { localStorage.setItem('jnu-modal-dismissed', '1'); } catch (e) {} };
+$('open-settings').onclick = () => openModal(true);
+$('status').onclick = () => openModal(true);
+$('close').onclick = closeModal;
+$('mask').onclick = (e) => { if (e.target === $('mask')) closeModal(); };
+// 帮助
+const closeHelp = () => $('help-mask').classList.remove('on');
+$('open-help').onclick = () => $('help-mask').classList.add('on');
+$('help-close').onclick = closeHelp;
+$('help-mask').onclick = (e) => { if (e.target === $('help-mask')) closeHelp(); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeHelp(); closeModal(); } });
+$('s-save').onclick = () => {
+  api = { baseUrl: $('s-base').value.trim().replace(/\/+$/, ''), model: $('s-model').value.trim(), key: $('s-key').value.trim() };
+  saveSettings();
+  // 换了配置就把它从停用名单里放出来，否则用户改好了却还在走兜底
+  for (const k of Object.keys(dead)) if (k.includes('|user|')) delete dead[k];
+  saveDead();
+  exhaustedShown = false;
+  updatePill(); closeModal();
+};
+$('s-clear').onclick = () => {
+  api = { baseUrl: '', model: '', key: '' };
+  try { localStorage.removeItem(LS); } catch (e) {}
+  for (const k of Object.keys(dead)) if (k.includes('|user|')) delete dead[k];
+  saveDead();
+  exhaustedShown = false;
+  updatePill(); openModal();
+};
+$('s-revive').onclick = () => {
+  reviveRoutes();
+  exhaustedShown = false;
+  $('s-state').innerHTML = '已重新启用内置兜底线路，可以再试一次。';
+};
+$('s-keyfile').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  try { const t = (await f.text()).trim(); const v = t.includes('=') ? t.split('=').slice(1).join('=').trim() : t; if (v) { $('s-key').value = v; $('s-state').textContent = '已从文件读入（长度 ' + v.length + '），点「保存」。'; } } catch (err) { $('s-state').textContent = '读取失败：' + err.message; }
+  e.target.value = '';
+};
+$('s-test').onclick = async () => {
+  const btn = $('s-test'); btn.disabled = true;
+  $('s-state').textContent = '测试中…（推理模型会先思考；内置线路会依次尝试，可能要几秒）';
+  const bak = api;
+  const typed = { baseUrl: $('s-base').value.trim().replace(/\/+$/, ''), model: $('s-model').value.trim(), key: $('s-key').value.trim() };
+  // 三个都填了才用输入框里的；否则退回内置兜底线路来测
+  api = (typed.baseUrl && typed.model && typed.key) ? typed : { baseUrl: '', model: '', key: '' };
+  try {
+    const r = await callLLM('你是连通性测试助手。', '请回答：可以用', 0, 600);
+    const alive = aliveRoutes().length, total = allRoutes().length;
+    $('s-state').innerHTML = '✅ 连接成功：<b>' + esc(lastRoute ? lastRoute.label : '') + '</b>'
+      + '（' + esc(lastRoute ? lastRoute.model : '') + '）<br>返回：' + esc(r.slice(0, 40))
+      + '<br>可用线路：' + alive + ' / ' + total + ' 条';
+  } catch (e) {
+    $('s-state').innerHTML = '❌ ' + esc(e.message);
+  } finally { api = bak; updatePill(); btn.disabled = false; }
+};
+$('s-scan').onclick = async () => {
+  const btn = $('s-scan'); btn.disabled = true; const box = $('s-models');
+  box.innerHTML = '<span style="color:var(--muted);font-size:12px">扫描中…</span>';
+  const base = $('s-base').value.trim().replace(/\/+$/, ''); const key = $('s-key').value.trim();
+  try {
+    const r = await fetch(base + '/models', { headers: { Authorization: 'Bearer ' + key } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const ms = (d.data || []).map((m) => m.id).filter(Boolean).sort();
+    box.innerHTML = ms.length ? '<select id="s-modelsel" style="width:100%;font:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:9px">' + ms.map((m) => `<option>${esc(m)}</option>`).join('') + '</select><div style="font-size:12px;color:var(--muted);margin-top:4px">共 ' + ms.length + ' 个，选择后自动填入。</div>' : '<span style="color:var(--muted);font-size:12px">没有返回模型列表。</span>';
+    const sel = document.getElementById('s-modelsel'); if (sel) sel.onchange = () => { $('s-model').value = sel.value; };
+  } catch (e) { box.innerHTML = '<span style="color:var(--bad);font-size:12px">扫描失败：' + esc(e.message) + '</span>'; }
+  btn.disabled = false;
+};
+
+/* ===== 校园地图 ===== */
+// 四向同构：底图在 应用/map/campus-map.jpg（build.mjs 内联成 data URI）、几何在本文件的 SVG 里
+// （id="mp-r-<MP-id>"，坐标直接是底图原始像素，viewBox="0 0 6458 8901"）、文字在
+// 知识库/shards/MP-校园导览.json、照片在 应用/photos/<MP-id>.jpg。四者由 build.mjs 校验一一对应，
+// 缺一即中止打包，所以这里不需要任何映射表，也就没有映射表写错的可能。
+const MP_BY_ID = {};
+ITEMS.forEach((i) => { if (i.shard === 'MP') MP_BY_ID[i.id] = i; });
+let mpSel = null;
+let mpW = 0;         // 当前画框宽度（CSS px）；0 = 还没量过尺寸
+let mpZoomed = false; // 用户手动缩放过就不再自动复位，免得调好又被窗口变化打乱
+
+// 速览只取答案的头一两个完整句：一律在句号处断开，不会截出半句。
+function mpGist(a) {
+  const parts = String(a || '').split('。').filter((s) => s.trim());
+  if (!parts.length) return '';
+  let s = parts[0] + '。';
+  if (parts.length > 1 && s.length < 40) s += parts[1] + '。';
+  return s;
+}
+// 地标名的唯一来源是知识库条目的 name 字段——名字只写一份，图和文不会各写一遍
+function mpName(it) { return (it && it.name) || (it && it.id) || ''; }
+// 浮层贴光标定位：只用事件自带的 clientX/Y + offsetWidth，不用 getBoundingClientRect
+function mpMove(ev) {
+  const t = $('mp-tip'); if (!t || t.style.display !== 'block') return;
+  const w = t.offsetWidth || 280, h = t.offsetHeight || 96, p = 16;
+  let x = ev.clientX + p, y = ev.clientY + p;
+  if (x + w + 10 > window.innerWidth) x = Math.max(10, ev.clientX - w - p);
+  if (y + h + 10 > window.innerHeight) y = Math.max(10, ev.clientY - h - p);
+  t.style.left = x + 'px'; t.style.top = y + 'px';
+}
+function mpHover(id, g, ev) {
+  const it = MP_BY_ID[id], t = $('mp-tip');
+  if (!it || !t) return;
+  t.innerHTML = '<b>' + esc(mpName(it)) + '</b>' + esc(mpGist(it.answer));
+  t.style.display = 'block';
+  mpMove(ev);
+}
+function mpHide() { const t = $('mp-tip'); if (t) t.style.display = 'none'; }
+
+// —— 缩放 ——
+// 底图是 6458×8901 的竖长图，一屏放不下是常态。开图默认按**适应宽度**铺满画布，
+// 一眼看全校园左右，上下滚动接着看；想一眼看全整幅就按「适应」。
+const MP_MIN_W = 260, MP_MAX_W = 5200;
+let mpFitWhole = false; // 上一次「适应」是整幅还是适应宽度；窗口变化时按同一种方式重算
+function mpApply(w) {
+  const f = $('mp-frame'), c = $('mp-canvas');
+  if (!f) return;
+  const old = mpW;
+  if (w) mpW = Math.max(MP_MIN_W, Math.min(MP_MAX_W, Math.round(w)));
+  if (!mpW) return;
+  f.style.width = mpW + 'px';
+  const s = $('mp-scale'); if (s) s.textContent = '底图宽 ' + mpW + ' px';
+  // 放大/缩小时把视口中心留住，否则每次缩放都会跳回左上角。桩里没有 clientWidth，跳过即可。
+  if (c && old && c.clientWidth) {
+    const k = mpW / old;
+    c.scrollLeft = (c.scrollLeft + c.clientWidth / 2) * k - c.clientWidth / 2;
+    c.scrollTop = (c.scrollTop + c.clientHeight / 2) * k - c.clientHeight / 2;
+  }
+}
+// 「整幅」：把 6458×8901 的竖长图整个塞进画布。开图默认用**适应宽度**——竖长图塞进横画布后
+// 只有三百多像素宽，图上的字一个也认不出；按宽度铺满则一眼看全校园的左右，上下滚动接着看。
+function mpFit(whole) {
+  const c = $('mp-canvas'), img = $('mp-img');
+  if (!c || !img) return;
+  // verify.mjs / verify-map.mjs 的 DOM 桩里量不到尺寸，量不到就什么都不做
+  const cw = c.clientWidth, ch = c.clientHeight;
+  if (!cw || !ch) return;
+  mpFitWhole = !!whole;
+  if (whole) {
+    const iw = img.naturalWidth || 6458, ih = img.naturalHeight || 8901;
+    mpApply(Math.min(cw - 2, (ch - 2) * iw / ih));
+  } else {
+    mpApply(cw - 2);
+  }
+  mpZoomed = false;
+}
+function mpZoom(k) {
+  const c = $('mp-canvas');
+  const cur = mpW || (c && c.clientWidth) || 900;
+  mpApply(cur * k);
+  mpZoomed = true;
+}
+$('mp-in').onclick = () => mpZoom(1.3);
+$('mp-out').onclick = () => mpZoom(1 / 1.3);
+$('mp-fit').onclick = () => mpFit(true);
+// 面板切过来时画布才有尺寸，所以首次显示地图才量；之后只在用户没手动缩放过时跟随窗口变化
+if (typeof addEventListener === 'function') {
+  addEventListener('resize', () => { if (!mpZoomed) mpFit(mpFitWhole); });
+}
+
+function mpPick(id, g) {
+  const it = MP_BY_ID[id]; if (!it) return;
+  if (mpSel && mpSel !== g) mpSel.classList.remove('on');
+  if (g) { g.classList.add('on'); mpSel = g; }
+  const name = mpName(it);
+  const img = DATA.photos && DATA.photos[id];
+  const shot = img
+    ? '<img src="' + img + '" alt="' + esc(it.caption || name) + '">' + (it.caption ? '<div class="mp-cap">图：' + esc(it.caption) + '</div>' : '')
+    : '<div class="mp-nopic">本区域在本地史料库中没有校舍历史照片，图上如实留空。</div>';
+  const tags = ['<span class="tag">' + esc(it.id) + '</span>'];
+  if (it.status && it.status !== 'verified') tags.push('<span class="tag st">' + esc(it.status) + '</span>');
+  // 「深入」不把史实抄一份到地图侧栏，而是回到问答面板问该地标的史料条目——答案只存一份
+  const deep = (it.see_also || []).map((r) => {
+    const target = ITEMS.find((x) => x.id === r);
+    return target ? '<button type="button" class="mp-ask" onclick="mpDeep(\'' + esc(r).replace(/'/g, "\\'") + '\')">深入 · ' + esc(target.question) + '</button>' : '';
+  }).join('');
+  // 详情面板顶上的返回入口：点掉索引就再也回不去的话，看完一处只能靠点图上别处或刷新
+  $('mp-side').innerHTML = '<button type="button" class="mp-back" onclick="mpIndex()">← 地标索引</button>'
+    + '<h3>' + esc(name) + '</h3>' + shot
+    + '<div>' + esc(it.answer) + '</div>'
+    + (it.source ? '<div class="meta"><span>出处：' + esc(it.source) + '</span></div>' : '')
+    + (it.caveat ? '<div class="caveat">⚠ ' + esc(it.caveat) + '</div>' : '')
+    + '<div class="meta">' + tags.join('') + '</div>' + deep;
+}
+function mpDeep(id) {
+  const it = ITEMS.find((x) => x.id === id); if (!it) return;
+  showTab('qa');
+  ask(it.question, $('mode').value);
+}
+// 侧栏初始状态：把 12 处地标列成一排小按钮。缩到一屏时图上的地名认不出来，这份索引就是目录，
+// 点一下等于"在图上也点一下"，还会把该区域滚到画布中央。
+function mpGo(id) {
+  const g = document.getElementById('mp-r-' + id); if (!g) return;
+  mpPick(id, g);
+  const r = g.querySelector ? g.querySelector('rect') : null;
+  const c = $('mp-canvas');
+  if (!r || !r.getAttribute || !c || !c.clientWidth) return;
+  const k = (mpW || c.clientWidth) / 6458;
+  c.scrollLeft = (+r.getAttribute('x') + +r.getAttribute('width') / 2) * k - c.clientWidth / 2;
+  c.scrollTop = (+r.getAttribute('y') + +r.getAttribute('height') / 2) * k - c.clientHeight / 2;
+}
+function mpIndex() {
+  const el = $('mp-side'); if (!el) return;
+  // 顺带取消图上的选中态：右栏显示索引、图上却还亮着一处，两边就对不上了
+  if (mpSel) { mpSel.classList.remove('on'); mpSel = null; }
+  const ids = Object.keys(MP_BY_ID).sort();
+  el.innerHTML = '<p style="margin:0 0 4px"><b>石牌校区地图导览</b></p>'
+    + '<p style="margin:0" class="dim">图上 12 处描边区域可悬浮看速览、点击看史照与讲解；也可以直接点下面的地标名。</p>'
+    + '<div class="mp-idx-h">图上的 ' + ids.length + ' 处地标</div>'
+    + '<div class="mp-idx">' + ids.map((id) =>
+      '<button type="button" class="mp-go" onclick="mpGo(\'' + esc(id).replace(/'/g, "\\'") + '\')">'
+      + esc(mpName(MP_BY_ID[id])) + '</button>').join('') + '</div>'
+    + '<p class="empty" style="margin:10px 0 0">讲解文字来自知识库分片 MP，每个区域都用「深入」按钮指回持有该地史实的史料条目，可接着追问。</p>';
+}
+mpIndex();
+
+/* ===== 启动 ===== */
+function showTab(k) {
+  [['qa', 'tab-qa', 'panel-qa'], ['gen', 'tab-gen', 'panel-gen'], ['map', 'tab-map', 'panel-map']].forEach((t) => {
+    // 只用 classList.add/remove：verify.mjs 的 DOM 桩里这两个是空实现，且没有 toggle/contains
+    const cls = t[0] === k ? 'add' : 'remove';
+    $(t[1]).classList[cls]('on');
+    $(t[2]).classList[cls]('on');
+  });
+  if (k !== 'map') mpHide();
+  // 面板藏起来时量不到尺寸，所以要等 class 切换完再量；force layout 由 clientWidth 触发
+  else if (!mpW) mpFit(false);
+}
+$('tab-qa').onclick = () => showTab('qa');
+$('tab-gen').onclick = () => showTab('gen');
+$('tab-map').onclick = () => showTab('map');
+$('f').onsubmit = (e) => { e.preventDefault(); ask($('q').value, $('mode').value); $('q').value = ''; };
+$('ggo').onclick = generate;
+
+(async function boot() {
+  $('lib-info').textContent = ITEMS.length + ' 条史料 · ' + SHARDS.length + ' 个分片';
+  $('mode').innerHTML = Object.entries(MODES).map(([k, v]) => `<option value="${k}"${k === 'spoken' ? ' selected' : ''}>${v.label}</option>`).join('');
+  $('gshard').innerHTML = '<option value="">（按主题，见右侧输入框）</option>' + SHARDS.map((s) => `<option value="${s.shard}">${s.shard} · ${s.title}（${s.count}条）</option>`).join('');
+  // 先把内置兜底线路解出来再刷状态栏，否则会先显示"已连接"、再跳成"离线"
+  await ensureChain();
+  updatePill();
+  const picks = [...ITEMS].sort(() => Math.random() - 0.5).slice(0, 4).map((i) => i.question);
+  $('log').insertAdjacentHTML('beforeend', '<div class="row bot"><div class="bubble">可以问我：' + showHints(picks) + '</div></div>');
+  // 内置线路能用就不打扰；一条线路都没有时才自动弹窗要求填自己的服务
+  let dismissed = false; try { dismissed = Boolean(localStorage.getItem('jnu-modal-dismissed')); } catch (e) {}
+  if (!hasModel() && !dismissed) openModal(true);
+  window.__bootOk = true;
+})();
+</script>
+
+<!-- 启动看门狗：主脚本没跑起来时显示原因 -->
+<script>
+setTimeout(function () {
+  if (window.__bootOk) { var w = document.getElementById('boot-warn'); if (w) w.style.display = 'none'; return; }
+  var w = document.getElementById('boot-warn'); if (!w) return;
+  w.style.display = 'block';
+  var d = document.getElementById('boot-detail');
+  d.innerHTML = window.__scriptLoaded ? '启动中断。' : '脚本未能加载。';
+  if (window.__errs && window.__errs.length) d.innerHTML += ' <code>' + window.__errs.slice(0, 3).join('</code> <code>') + '</code>';
+}, 1800);
+</script>
+</body>
+</html>
