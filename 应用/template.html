@@ -275,7 +275,10 @@ window.addEventListener('unhandledrejection', function (e) { var r = e && e.reas
     <button class="close" id="close" type="button">×</button>
     <h3>模型设置</h3>
     <label>API 地址</label>
-    <input id="s-base" type="text" placeholder="https://api.deepseek.com/v1">
+    <div style="display:flex;gap:8px">
+      <input id="s-base" type="text" placeholder="https://api.deepseek.com/v1">
+      <button id="s-local" type="button" style="white-space:nowrap">本地模型</button>
+    </div>
     <label>模型</label>
     <div style="display:flex;gap:8px">
       <input id="s-model" type="text" placeholder="deepseek-v4-flash">
@@ -307,6 +310,7 @@ window.addEventListener('unhandledrejection', function (e) { var r = e && e.reas
     <ol>
       <li>直接提问即可，页面已内置可用的模型服务。</li>
       <li>如需改用自己的服务，在右上角「设置」中填入 API 地址、模型与密钥。</li>
+      <li>也可以接入本机部署的模型（Ollama、vLLM 等）：设置里点「本地模型」→「扫描可用模型」选一个。</li>
     </ol>
 
     <h4>页面状态</h4>
@@ -770,6 +774,19 @@ $('s-test').onclick = async () => {
   } catch (e) {
     $('s-state').innerHTML = '❌ ' + esc(e.message);
   } finally { api = bak; updatePill(); btn.disabled = false; }
+};
+// —— 本地部署入口 ——
+// Ollama / vLLM / llama.cpp / LM Studio 都提供 OpenAI 兼容接口，所以"接入本地模型"不需要改代码，
+// 只要把地址指过去。这里只填地址、不猜模型名：填完点「扫描可用模型」，由本地服务返回真实 tag。
+$('s-local').onclick = () => {
+  $('s-base').value = 'http://127.0.0.1:11434/v1';
+  $('s-key').value = 'local'; // 本地服务多数不校验密钥，但留空会被判定"未配置"
+  $('s-state').innerHTML =
+    '已填入 <b>Ollama</b> 默认地址。其他本地服务改端口即可：vLLM 用 8000、LM Studio 用 1234。<br>'
+    + '密钥随便填（本地服务一般不校验）。下一步点「扫描可用模型」，列出本机已装模型后选一个。<br>'
+    + '⚠ 本地服务必须放行跨域，否则页面调不通：Ollama 需设 <code>OLLAMA_ORIGINS=*</code> 后重启；'
+    + 'vLLM 需加 <code>--allowed-origins "*"</code>。';
+  $('s-model').focus();
 };
 $('s-scan').onclick = async () => {
   const btn = $('s-scan'); btn.disabled = true; const box = $('s-models');
