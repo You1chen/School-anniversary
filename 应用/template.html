@@ -801,22 +801,53 @@ $('s-test').onclick = async () => {
   } finally { api = bak; updatePill(); btn.disabled = false; }
 };
 // —— 本地部署入口 ——
-// Ollama / vLLM / llama.cpp / LM Studio 都提供 OpenAI 兼容接口，所以"接入本地模型"不需要改代码，
-// 只要把地址指过去。这里只填地址、不猜模型名：填完点「扫描可用模型」，由本地服务返回真实 tag。
-$('s-local').onclick = () => {
-  $('s-base').value = 'http://127.0.0.1:11434/v1';
-  $('s-key').value = 'local'; // 本地服务多数不校验密钥，但留空会被判定"未配置"
-  $('s-state').innerHTML =
-    '已填入 <b>Ollama</b> 默认地址。其他本地服务改端口即可：vLLM 用 8000、LM Studio 用 1234。<br>'
-    + '密钥随便填（本地服务一般不校验）。下一步点「扫描可用模型」，列出本机已装模型后选一个。<br>'
-    + '⚠ 本地服务必须放行跨域，否则页面调不通：Ollama 需设 <code>OLLAMA_ORIGINS=*</code> 后重启；'
-    + 'vLLM 需加 <code>--allowed-origins "*"</code>。';
-  $('s-model').focus();
+// Ollama / vLLM / llama.cpp / LM Studio 都提供 OpenAI 兼容接口，所以"接入本地模型"不需要改代码。
+// 上一版这里写死了 Ollama 的 11434，结果机器上跑的是 llama.cpp 的 8080 —— 点了按钮反而
+// 指向一个没人监听的端口，扫描直接 "Failed to fetch"。现在改成**逐个探测常见端口**。
+const LOCAL_PORTS = [[8080, 'llama.cpp'], [11434, 'Ollama'], [1234, 'LM Studio'], [8000, 'vLLM'], [5001, '其它']];
+
+// 探一个地址上有没有 OpenAI 兼容服务在听；返回模型 id 列表
+async function probeLocal(base, ms) {
+  try {
+    const r = await fetch(base + '/models', {
+      headers: { Authorization: 'Bearer local' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(ms || 1500) : undefined,
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return ((d.data || []).map((m) => m.id)).filter(Boolean);
+  } catch { return null; }
+}
+
+$('s-local').onclick = async () => {
+  const box = $('s-state');
+  box.innerHTML = '正在探测本机常见端口（8080 / 11434 / 1234 / 8000）…';
+  const hits = [];
+  for (const [port, name] of LOCAL_PORTS) {
+    const ids = await probeLocal('http://127.0.0.1:' + port + '/v1');
+    if (ids) hits.push({ port, name, base: 'http://127.0.0.1:' + port + '/v1', ids });
+  }
+  $('s-key').value = 'local'; // 本地服务多不校验密钥，但留空会被判"未配置"
+  if (!hits.length) {
+    $('s-base').value = 'http://127.0.0.1:11434/v1';
+    box.innerHTML = '没探测到本地服务（试过 8080 / 11434 / 1234 / 8000）。<br>'
+      + '先启动服务：Ollama 用 <code>ollama serve</code>，llama.cpp 用 <code>llama-server -m 模型.gguf</code>。<br>'
+      + '⚠ 跨域：Ollama 需设 <code>OLLAMA_ORIGINS=*</code> 再重启；vLLM 需加 <code>--allowed-origins "*"</code>。';
+    return;
+  }
+  const best = hits[0];
+  $('s-base').value = best.base;
+  if (best.ids.length) $('s-model').value = best.ids[0];
+  box.innerHTML = '✅ 探测到 <b>' + esc(best.name) + '</b>：<code>' + esc(best.base) + '</code>'
+    + (best.ids.length ? '<br>模型：<code>' + esc(best.ids[0]) + '</code>' : '<br>（该服务没返回模型列表，请手动填模型名）')
+    + (hits.length > 1 ? '<br>另外还在听：' + hits.slice(1).map((h) => esc(h.name) + ':' + h.port).join('、') : '')
+    + '<br>点「保存」即可；要换模型点「扫描可用模型」。';
 };
 $('s-scan').onclick = async () => {
   const btn = $('s-scan'); btn.disabled = true; const box = $('s-models');
   box.innerHTML = '<span style="color:var(--muted);font-size:12px">扫描中…</span>';
   const base = $('s-base').value.trim().replace(/\/+$/, ''); const key = $('s-key').value.trim();
+  if (!base) { box.innerHTML = '<span style="color:var(--bad);font-size:12px">先填 API 地址。</span>'; btn.disabled = false; return; }
   try {
     const r = await fetch(base + '/models', { headers: { Authorization: 'Bearer ' + key } });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -824,7 +855,16 @@ $('s-scan').onclick = async () => {
     const ms = (d.data || []).map((m) => m.id).filter(Boolean).sort();
     box.innerHTML = ms.length ? '<select id="s-modelsel" style="width:100%;font:inherit;font-size:13px;padding:8px;border:1px solid var(--line);border-radius:9px">' + ms.map((m) => `<option>${esc(m)}</option>`).join('') + '</select><div style="font-size:12px;color:var(--muted);margin-top:4px">共 ' + ms.length + ' 个，选择后自动填入。</div>' : '<span style="color:var(--muted);font-size:12px">没有返回模型列表。</span>';
     const sel = document.getElementById('s-modelsel'); if (sel) sel.onchange = () => { $('s-model').value = sel.value; };
-  } catch (e) { box.innerHTML = '<span style="color:var(--bad);font-size:12px">扫描失败：' + esc(e.message) + '</span>'; }
+  } catch (e) {
+    // "Failed to fetch" 说得太少：本地地址连不上，八成是端口不对或服务没起
+    const local = isLocalRoute({ baseUrl: base });
+    box.innerHTML = '<span style="color:var(--bad);font-size:12px">扫描失败：' + esc(e.message) + '</span>'
+      + (local ? '<div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.7">'
+        + '连不上这个本地地址。按顺序查：<br>① 服务起了没（llama.cpp 常见 8080、Ollama 11434、LM Studio 1234）；<br>'
+        + '② 端口对不对——点上面的「本地模型」可自动探测；<br>'
+        + '③ 有没有放行跨域：Ollama 要 <code>OLLAMA_ORIGINS=*</code>，vLLM 要 <code>--allowed-origins "*"</code>。</div>'
+        : '');
+  }
   btn.disabled = false;
 };
 

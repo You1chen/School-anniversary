@@ -37,6 +37,14 @@ globalThis.document = {
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {};
 const store = new Map();
+// LOCAL=1：把页面指向本机 llama-server，验证「交付件 + 本地模型」这条路真的通
+if (process.env.LOCAL) {
+  store.set('jnu-avatar-settings-v1', JSON.stringify({
+    baseUrl: process.env.LOCAL_BASE || 'http://127.0.0.1:8080/v1',
+    model: process.env.LOCAL_MODEL || 'local',
+    key: 'local',
+  }));
+}
 // 故障转移测试：预先把首选线路写进停用名单，看它是否跳过并继续往后试
 if (FAILOVER) {
   store.set('jnu-route-dead-v1', JSON.stringify({
