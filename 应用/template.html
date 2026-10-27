@@ -103,6 +103,8 @@ window.addEventListener('unhandledrejection', function (e) { var r = e && e.reas
   .modal button{font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--blue);cursor:pointer}
   .modal button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
   .modal button:disabled{opacity:.5}
+  .modal .mode{font:inherit;font-size:12.5px;padding:6px 15px;border-radius:99px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer}
+  .modal .mode.on{background:var(--blue);border-color:var(--blue);color:#fff}
   .modal .warnbox{margin-top:10px;font-size:12px;background:#fff8ec;border-left:3px solid #e0a94a;padding:8px 10px;border-radius:0 6px 6px 0;color:#8a5a00;line-height:1.7}
   .modal .okbox{margin-top:10px;font-size:12px;background:#f2faf5;border-left:3px solid #bfe0cd;padding:8px 10px;border-radius:0 6px 6px 0;color:#1c7a4a;line-height:1.7}
   .modal.wide{width:min(640px,100%)}
@@ -274,10 +276,14 @@ window.addEventListener('unhandledrejection', function (e) { var r = e && e.reas
   <div class="modal">
     <button class="close" id="close" type="button">×</button>
     <h3>模型设置</h3>
+    <div style="display:flex;gap:6px;margin:2px 0 12px">
+      <button id="m-cloud" type="button" class="mode on">云端自定义</button>
+      <button id="m-local" type="button" class="mode">本地模型</button>
+    </div>
     <label>API 地址</label>
     <div style="display:flex;gap:8px">
       <input id="s-base" type="text" placeholder="https://api.deepseek.com/v1">
-      <button id="s-local" type="button" style="white-space:nowrap">本地模型</button>
+      <button id="s-local" type="button" style="white-space:nowrap">探测</button>
     </div>
     <label>模型</label>
     <div style="display:flex;gap:8px">
@@ -418,12 +424,30 @@ const GEN_KINDS = {
 };
 
 /* ===== 设置 ===== */
+// 两档独立配置：云端自定义 / 本地模型。
+// 为什么不是单份配置：原来点「本地模型」是**直接覆写** baseUrl 与 model，
+// 用户之前填的 DeepSeek 地址和模型名就被顶掉了，切回去得重填。
+// 现在每档各存一份，切换时把当前输入存回本档、再载入目标档，互不覆盖。
 const LS = 'jnu-avatar-settings-v1';
-let api = { baseUrl: '', model: '', key: '' };
-try { api = Object.assign(api, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) {}
+const SLOT_NAMES = { cloud: '云端', local: '本地' };
+let api = { baseUrl: '', model: '', key: '', mode: 'cloud', slots: { cloud: null, local: null } };
+try {
+  const saved = JSON.parse(localStorage.getItem(LS) || '{}');
+  api = Object.assign(api, saved);
+  if (!api.slots || typeof api.slots !== 'object') api.slots = { cloud: null, local: null };
+  if (api.mode !== 'local') api.mode = 'cloud';
+} catch (e) { /* 存储坏了就用默认 */ }
 const DEFAULTS = DATA.defaults || { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' };
 function hasKey(){ return Boolean(api.baseUrl && api.model && api.key); }
 function saveSettings(){ try { localStorage.setItem(LS, JSON.stringify(api)); } catch (e) {} }
+// 读输入框 → 当前值（未去掉尾部斜杠的原始状态，保存时再规范化）
+function readFields() {
+  return {
+    baseUrl: $('s-base').value.trim().replace(/\/+$/, ''),
+    model: $('s-model').value.trim(),
+    key: $('s-key').value.trim(),
+  };
+}
 
 /* ===== 内置兜底模型链 =====
    线路与密钥以密文内联（见 FALLBACK_ENC），运行时用 crypto-mini 解出。
@@ -735,10 +759,20 @@ function updatePill() {
     st.title = chainErr ? ('内置模型不可用：' + chainErr) : '模型线路已用尽，点此填入自己的服务';
   }
 }
+// 高亮当前档位
+function renderModeTabs() {
+  const cloud = $('m-cloud'), local = $('m-local');
+  if (!cloud || !local) return;
+  cloud.className = 'mode' + (api.mode === 'cloud' ? ' on' : '');
+  local.className = 'mode' + (api.mode === 'local' ? ' on' : '');
+}
+
 function openModal(force) {
+  // 用当前生效的配置填表；两档各自的存档在 slots 里，切换时才载入
   $('s-base').value = api.baseUrl || DEFAULTS.baseUrl;
   $('s-model').value = api.model || DEFAULTS.model;
   $('s-key').value = api.key;
+  renderModeTabs();
   if (!hasModel()) $('s-state').innerHTML = '填入你自己的模型服务（API 地址、模型名、密钥）。';
   else if (hasKey()) $('s-state').innerHTML = '已配置你自己的模型；<b>清空后</b>则改用内置兜底模型。';
   else $('s-state').innerHTML = '当前使用<b>内置兜底模型</b>，可直接关掉开始提问。<br>也可以填入你自己的服务来替代它。';
@@ -756,8 +790,42 @@ $('open-help').onclick = () => $('help-mask').classList.add('on');
 $('help-close').onclick = closeHelp;
 $('help-mask').onclick = (e) => { if (e.target === $('help-mask')) closeHelp(); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeHelp(); closeModal(); } });
+// —— 两档切换：存本档 → 载入目标档，互不覆盖 ——
+async function switchMode(mode) {
+  if (mode === api.mode) return;
+  // 1) 把输入框里的内容存回**当前**档（用户可能改了但没点保存）
+  api.slots[api.mode] = readFields();
+  // 2) 切档
+  api.mode = mode;
+  const s = api.slots[mode];
+  if (s && (s.baseUrl || s.model || s.key)) {
+    $('s-base').value = s.baseUrl || '';
+    $('s-model').value = s.model || '';
+    $('s-key').value = s.key || '';
+    $('s-state').innerHTML = '已切到 <b>' + SLOT_NAMES[mode] + '</b>，沿用这一档上次保存的配置。<br>点「保存」生效。';
+  } else if (mode === 'local') {
+    $('s-state').innerHTML = '本地档还是空的，正在探测本机服务…';
+    renderModeTabs();
+    await probeAndFillLocal();
+    api.slots.local = readFields();
+    renderModeTabs();
+    return;
+  } else {
+    $('s-base').value = DEFAULTS.baseUrl;
+    $('s-model').value = DEFAULTS.model;
+    $('s-key').value = '';
+    $('s-state').innerHTML = '已切到 <b>云端自定义</b>，填入你的 API 地址、模型名与密钥后保存。';
+  }
+  saveSettings();
+  renderModeTabs();
+}
+$('m-cloud').onclick = () => switchMode('cloud');
+$('m-local').onclick = () => switchMode('local');
+
 $('s-save').onclick = () => {
-  api = { baseUrl: $('s-base').value.trim().replace(/\/+$/, ''), model: $('s-model').value.trim(), key: $('s-key').value.trim() };
+  const f = readFields();
+  api.baseUrl = f.baseUrl; api.model = f.model; api.key = f.key;
+  api.slots[api.mode] = { ...f };   // 只写当前档，另一档原样保留
   saveSettings();
   // 换了配置就把它从停用名单里放出来，否则用户改好了却还在走兜底
   for (const k of Object.keys(dead)) if (k.includes('|user|')) delete dead[k];
@@ -766,12 +834,16 @@ $('s-save').onclick = () => {
   updatePill(); closeModal();
 };
 $('s-clear').onclick = () => {
-  api = { baseUrl: '', model: '', key: '' };
-  try { localStorage.removeItem(LS); } catch (e) {}
+  // 只清当前档，另一档留着
+  api.slots[api.mode] = null;
+  api.baseUrl = ''; api.model = ''; api.key = '';
+  saveSettings();
   for (const k of Object.keys(dead)) if (k.includes('|user|')) delete dead[k];
   saveDead();
   exhaustedShown = false;
-  updatePill(); openModal();
+  $('s-base').value = ''; $('s-model').value = ''; $('s-key').value = '';
+  $('s-state').innerHTML = '已清空 <b>' + SLOT_NAMES[api.mode] + '</b> 档（另一档不受影响）。';
+  updatePill();
 };
 $('s-revive').onclick = () => {
   reviveRoutes();
@@ -819,7 +891,9 @@ async function probeLocal(base, ms) {
   } catch { return null; }
 }
 
-$('s-local').onclick = async () => {
+// 探测并填入本地档：找到就填地址+模型名，找不到就给出启动指引。
+// 抽成函数是因为两处都要用：切到「本地」档时自动探测，以及手动点「探测」。
+async function probeAndFillLocal() {
   const box = $('s-state');
   box.innerHTML = '正在探测本机常见端口（8080 / 11434 / 1234 / 8000）…';
   const hits = [];
@@ -833,7 +907,7 @@ $('s-local').onclick = async () => {
     box.innerHTML = '没探测到本地服务（试过 8080 / 11434 / 1234 / 8000）。<br>'
       + '先启动服务：Ollama 用 <code>ollama serve</code>，llama.cpp 用 <code>llama-server -m 模型.gguf</code>。<br>'
       + '⚠ 跨域：Ollama 需设 <code>OLLAMA_ORIGINS=*</code> 再重启；vLLM 需加 <code>--allowed-origins "*"</code>。';
-    return;
+    return false;
   }
   const best = hits[0];
   $('s-base').value = best.base;
@@ -842,7 +916,9 @@ $('s-local').onclick = async () => {
     + (best.ids.length ? '<br>模型：<code>' + esc(best.ids[0]) + '</code>' : '<br>（该服务没返回模型列表，请手动填模型名）')
     + (hits.length > 1 ? '<br>另外还在听：' + hits.slice(1).map((h) => esc(h.name) + ':' + h.port).join('、') : '')
     + '<br>点「保存」即可；要换模型点「扫描可用模型」。';
-};
+  return true;
+}
+$('s-local').onclick = () => probeAndFillLocal();
 $('s-scan').onclick = async () => {
   const btn = $('s-scan'); btn.disabled = true; const box = $('s-models');
   box.innerHTML = '<span style="color:var(--muted);font-size:12px">扫描中…</span>';
